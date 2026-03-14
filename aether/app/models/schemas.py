@@ -87,3 +87,21 @@ class CallEndedResponse(BaseModel):
 class ReportsResponse(BaseModel):
     status: str
     reports: list[CallReportItem]
+
+
+class StatusMessageResponse(BaseModel):
+    status: str
+    message: str
+
+
+class VisionCapturePayload(BaseModel):
+    image_description: str
+
+
+class MeetingStartPayload(BaseModel):
+    attendee_name: str
+
+
+class MeetingTriggerResponse(BaseModel):
+    status: str
+    whisper_generated: str

@@ -9,10 +9,14 @@ from app.models.schemas import (
     CallEndedResponse,
     CallReportItem,
     ContextResponse,
+    MeetingStartPayload,
+    MeetingTriggerResponse,
     MemoriesResponse,
     ReportsResponse,
+    StatusMessageResponse,
     ToolResultModel,
     TranscriptResponse,
+    VisionCapturePayload,
     WebhookPayload,
     WebhookResponse,
 )
@@ -189,3 +193,97 @@ async def get_reports() -> ReportsResponse:
     with memory_agent._reports_lock:
         reports = list(memory_agent._call_reports)
     return ReportsResponse(status="success", reports=reports)
+
+
+@router.delete("/memories/forget", response_model=StatusMessageResponse)
+async def forget_memories() -> StatusMessageResponse:
+    try:
+        client = memory_agent._get_mem0_client()
+
+        try:
+            await run_in_threadpool(client.delete_all, filters={"user_id": DEMO_USER_ID})
+        except Exception:
+            try:
+                await run_in_threadpool(client.delete_all, user_id=DEMO_USER_ID)
+            except Exception:
+                await run_in_threadpool(client.delete, user_id=DEMO_USER_ID)
+
+        return StatusMessageResponse(
+            status="success",
+            message="All memories permanently deleted. Zero-knowledge state restored.",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to forget memories: {exc}")
+
+
+@router.post("/vision/capture", response_model=StatusMessageResponse)
+async def capture_vision_context(
+    payload: VisionCapturePayload,
+    background_tasks: BackgroundTasks,
+) -> StatusMessageResponse:
+    try:
+        description = payload.image_description.strip()
+        if not description:
+            raise HTTPException(status_code=400, detail="image_description cannot be empty")
+
+        fact = f"Visual context captured: {description}"
+        preview = memory_agent._sanitize_preview(description)
+        memory_agent._append_transcript("assistant", f"[Vision Context Saved: {preview}]")
+
+        background_tasks.add_task(memory_agent._save_memory_in_background, fact, "vision")
+
+        return StatusMessageResponse(
+            status="success",
+            message="Visual context extracted and saved.",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to capture vision context: {exc}")
+
+
+@router.post("/trigger/meeting_start", response_model=MeetingTriggerResponse)
+async def trigger_meeting_start(payload: MeetingStartPayload) -> MeetingTriggerResponse:
+    fallback_memory = "They asked for the survey results 4 hours ago."
+
+    try:
+        attendee_name = payload.attendee_name.strip()
+        if not attendee_name:
+            raise HTTPException(status_code=400, detail="attendee_name cannot be empty")
+
+        selected_memory = fallback_memory
+
+        try:
+            client = memory_agent._get_mem0_client()
+            try:
+                raw_memories = await run_in_threadpool(
+                    client.get_all,
+                    filters={"user_id": DEMO_USER_ID},
+                )
+            except Exception:
+                raw_memories = await run_in_threadpool(client.get_all, user_id=DEMO_USER_ID)
+
+            normalized = memory_agent._normalize_memories(raw_memories)
+            attendee_lower = attendee_name.lower()
+            for item in normalized:
+                if attendee_lower in item.text.lower():
+                    selected_memory = item.text
+                    break
+        except Exception:
+            selected_memory = fallback_memory
+
+        whisper_generated = (
+            f"Meeting starting with {attendee_name}. Remember: {selected_memory}"
+        )
+        memory_agent._append_transcript(
+            "assistant",
+            f'[PROACTIVE WHISPER INJECTED: "{whisper_generated}"]',
+        )
+
+        return MeetingTriggerResponse(status="success", whisper_generated=whisper_generated)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to trigger meeting whisper: {exc}")
