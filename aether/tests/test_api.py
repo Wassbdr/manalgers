@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from app.core.config import DEMO_USER_ID
+from app.core.config import DEMO_USER_ID, settings
 from app.main import app
 from app.services import memory_agent
 
@@ -81,7 +81,11 @@ def test_save_memory_webhook_and_transcript(monkeypatch: Any) -> None:
         }
     }
 
-    response = client.post("/api/v1/webhook/save_memory", json=payload)
+    response = client.post(
+        "/api/v1/webhook/save_memory",
+        json=payload,
+        headers={"X-Webhook-Token": settings.webhook_token},
+    )
     assert response.status_code == 200
     assert response.json() == {
         "results": [{"toolCallId": "tc_1", "result": "Memory successfully saved."}]
@@ -127,6 +131,10 @@ def test_webhook_ignores_invalid_calls(monkeypatch: Any) -> None:
         }
     }
 
-    response = client.post("/api/v1/webhook/save_memory", json=payload)
+    response = client.post(
+        "/api/v1/webhook/save_memory",
+        json=payload,
+        headers={"X-Webhook-Token": settings.webhook_token},
+    )
     assert response.status_code == 200
     assert response.json() == {"results": []}

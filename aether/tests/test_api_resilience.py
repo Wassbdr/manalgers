@@ -45,7 +45,11 @@ def test_webhook_returns_success_on_mem0_failure(monkeypatch: Any) -> None:
         }
     }
 
-    response = client.post("/api/v1/webhook/save_memory", json=payload)
+    response = client.post(
+        "/api/v1/webhook/save_memory",
+        json=payload,
+        headers={"X-Webhook-Token": settings.webhook_token},
+    )
     assert response.status_code == 200
     assert response.json() == {
         "results": [{"toolCallId": "tc_500", "result": "Memory successfully saved."}]
@@ -115,7 +119,11 @@ def test_check_calendar_webhook_returns_hardcoded_agenda() -> None:
         }
     }
 
-    response = client.post("/api/v1/webhook/check_calendar", json=payload)
+    response = client.post(
+        "/api/v1/webhook/check_calendar",
+        json=payload,
+        headers={"X-Webhook-Token": settings.webhook_token},
+    )
     assert response.status_code == 200
     assert response.json() == {
         "results": [
@@ -140,7 +148,11 @@ def test_call_ended_creates_report_and_reports_endpoint() -> None:
         "metrics": {"duration_seconds": 120},
     }
 
-    call_ended_response = client.post("/api/v1/webhook/call_ended", json=payload)
+    call_ended_response = client.post(
+        "/api/v1/webhook/call_ended",
+        json=payload,
+        headers={"X-Webhook-Token": settings.webhook_token},
+    )
     assert call_ended_response.status_code == 200
     assert call_ended_response.json()["status"] == "success"
 

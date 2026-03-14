@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from app.core.config import DEMO_USER_ID
+from app.core.config import DEMO_USER_ID, settings
 from app.main import app
 from app.services import memory_agent
 
@@ -85,7 +85,11 @@ def test_demo_simulation_end_to_end(monkeypatch: Any) -> None:
             ],
         }
     }
-    save_memory_response = client.post("/api/v1/webhook/save_memory", json=save_memory_payload)
+    save_memory_response = client.post(
+        "/api/v1/webhook/save_memory",
+        json=save_memory_payload,
+        headers={"X-Webhook-Token": settings.webhook_token},
+    )
     assert save_memory_response.status_code == 200
     assert save_memory_response.json() == {
         "results": [{"toolCallId": "demo_tc_1", "result": "Memory successfully saved."}]
@@ -127,7 +131,11 @@ def test_demo_simulation_end_to_end(monkeypatch: Any) -> None:
             ],
         }
     }
-    calendar_response = client.post("/api/v1/webhook/check_calendar", json=calendar_payload)
+    calendar_response = client.post(
+        "/api/v1/webhook/check_calendar",
+        json=calendar_payload,
+        headers={"X-Webhook-Token": settings.webhook_token},
+    )
     assert calendar_response.status_code == 200
     assert calendar_response.json()["results"][0]["toolCallId"] == "demo_tc_calendar"
 
@@ -140,6 +148,7 @@ def test_demo_simulation_end_to_end(monkeypatch: Any) -> None:
             ],
             "metrics": {"duration_seconds": 95},
         },
+        headers={"X-Webhook-Token": settings.webhook_token},
     )
     assert call_ended_response.status_code == 200
     assert call_ended_response.json()["status"] == "success"

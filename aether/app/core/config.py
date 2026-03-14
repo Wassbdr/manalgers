@@ -8,16 +8,18 @@ from dotenv import load_dotenv
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ENV_PATH = PROJECT_ROOT / ".env"
+
 
 def _load_environment() -> None:
-    env_path = Path.cwd() / ".env"
-    if env_path.exists():
-        load_dotenv(dotenv_path=env_path, override=False)
+    if ENV_PATH.exists():
+        load_dotenv(dotenv_path=ENV_PATH, override=False)
         return
 
     # Fallback for uncommon file variants (for example, ".env "),
     # while explicitly skipping template files.
-    for env_file in Path.cwd().glob(".env*"):
+    for env_file in PROJECT_ROOT.glob(".env*"):
         if env_file.name in {".env", ".env.example"}:
             continue
         if env_file.is_file():
@@ -30,11 +32,21 @@ _load_environment()
 
 class Settings(BaseSettings):
     mem0_api_key: str | None = None
-    webhook_token: str | None = None
-    cors_origins: list[str] = ["*"]
+    webhook_token: str = "demo-webhook-token"
+    cors_origins: str | list[str] = "http://localhost:5173,http://localhost:5174"
+    # Controls how external APIs are used:
+    # - auto: use real APIs when configured, otherwise fallback where supported
+    # - real: force real APIs only (raise if missing config)
+    # - mock: use in-memory mocks where supported
+    external_services_mode: str = "auto"
+    vapi_api_key: str | None = None
+    vapi_base_url: str = "https://api.vapi.ai"
+    # Public URL of this backend that Vapi will POST webhooks to.
+    # Example: https://your-tunnel.ngrok.io
+    vapi_server_url: str | None = None
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(ENV_PATH),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -42,15 +54,40 @@ class Settings(BaseSettings):
 
     @field_validator("cors_origins", mode="before")
     @classmethod
-    def parse_cors_origins(cls, value: Any) -> list[str]:
+    def parse_cors_origins(cls, value: Any) -> str | list[str]:
         if value is None or value == "":
-            return ["*"]
+            return "*"
         if isinstance(value, str):
-            parts = [item.strip() for item in value.split(",") if item.strip()]
-            return parts or ["*"]
+            return value
         if isinstance(value, list):
             parsed = [str(item).strip() for item in value if str(item).strip()]
             return parsed or ["*"]
+        return "*"
+
+    @field_validator("external_services_mode", mode="before")
+    @classmethod
+    def parse_external_services_mode(cls, value: Any) -> str:
+        if value is None:
+            return "auto"
+        mode = str(value).strip().lower()
+        if mode in {"auto", "real", "mock"}:
+            return mode
+        return "auto"
+
+    @field_validator("webhook_token", mode="before")
+    @classmethod
+    def parse_webhook_token(cls, value: Any) -> str:
+        token = "" if value is None else str(value).strip()
+        return token or "demo-webhook-token"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        value = self.cors_origins
+        if isinstance(value, list):
+            return value or ["*"]
+        if isinstance(value, str):
+            parts = [item.strip() for item in value.split(",") if item.strip()]
+            return parts or ["*"]
         return ["*"]
 
 

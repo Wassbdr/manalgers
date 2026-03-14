@@ -43,7 +43,7 @@ class ToolCallArguments(BaseModel):
 
 class ToolCallModel(BaseModel):
     id: str | None = None
-    arguments: ToolCallArguments | dict[str, Any] | None = None
+    arguments: ToolCallArguments | dict[str, Any] | str | None = None
 
 
 class ToolWithToolCallModel(BaseModel):
@@ -95,13 +95,52 @@ class StatusMessageResponse(BaseModel):
 
 
 class VisionCapturePayload(BaseModel):
-    image_description: str
+    image_description: str = Field(min_length=1, max_length=2000)
 
 
 class MeetingStartPayload(BaseModel):
-    attendee_name: str
+    attendee_name: str = Field(min_length=1, max_length=120)
 
 
 class MeetingTriggerResponse(BaseModel):
     status: str
     whisper_generated: str
+
+
+# ---------------------------------------------------------------------------
+# Vapi
+# ---------------------------------------------------------------------------
+
+
+class VapiCallItem(BaseModel):
+    id: str
+    status: str | None = None
+    createdAt: str | None = None
+    endedAt: str | None = None
+
+
+class VapiCallsResponse(BaseModel):
+    status: str
+    calls: list[VapiCallItem]
+
+
+class VapiProvisionPayload(BaseModel):
+    system_prompt: str = Field(min_length=1, max_length=8000)
+    assistant_name: str | None = "Aether"
+
+
+class VapiProvisionResponse(BaseModel):
+    status: str
+    assistant_id: str
+    message: str
+
+
+class VapiInjectPayload(BaseModel):
+    call_id: str = Field(min_length=1, max_length=120)
+    message: str = Field(min_length=1, max_length=2000)
+    end_call_after: bool = False
+
+
+class VapiInjectResponse(BaseModel):
+    status: str
+    message: str

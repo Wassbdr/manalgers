@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 from contextlib import suppress
@@ -31,6 +32,70 @@ _mem0_lock = Lock()
 
 _call_reports: list[CallReportItem] = []
 _reports_lock = Lock()
+
+
+class _InMemoryMem0Client:
+    """Minimal Mem0-compatible client for local/demo mode."""
+
+    def __init__(self) -> None:
+        self._memories: list[dict[str, Any]] = []
+        self._lock = Lock()
+
+    def add(self, messages: list[dict[str, str]], **kwargs: Any) -> dict[str, Any]:
+        text = ""
+        if messages and isinstance(messages[0], dict):
+            content = messages[0].get("content")
+            if isinstance(content, str):
+                text = content.strip()
+
+        metadata = kwargs.get("metadata") if isinstance(kwargs, dict) else None
+        category = "general"
+        if isinstance(metadata, dict):
+            metadata_category = metadata.get("category")
+            if isinstance(metadata_category, str) and metadata_category.strip():
+                category = metadata_category.strip()
+
+        with self._lock:
+            self._memories.insert(
+                0,
+                {
+                    "id": f"mem-{len(self._memories) + 1}",
+                    "text": text,
+                    "category": category,
+                    "timestamp": _utc_now_iso(),
+                    "user_id": kwargs.get("user_id", DEMO_USER_ID),
+                },
+            )
+        return {"id": "ok"}
+
+    def get_all(self, **kwargs: Any) -> dict[str, Any]:
+        user_id = kwargs.get("user_id")
+        filters = kwargs.get("filters")
+        if isinstance(filters, dict):
+            user_id = filters.get("user_id", user_id)
+
+        with self._lock:
+            if user_id:
+                result = [m for m in self._memories if m.get("user_id") == user_id]
+            else:
+                result = list(self._memories)
+        return {"results": result}
+
+    def delete_all(self, **kwargs: Any) -> dict[str, Any]:
+        user_id = kwargs.get("user_id")
+        filters = kwargs.get("filters")
+        if isinstance(filters, dict):
+            user_id = filters.get("user_id", user_id)
+
+        with self._lock:
+            if user_id:
+                self._memories = [m for m in self._memories if m.get("user_id") != user_id]
+            else:
+                self._memories.clear()
+        return {"status": "ok"}
+
+    def delete(self, **kwargs: Any) -> dict[str, Any]:
+        return self.delete_all(**kwargs)
 
 
 def _utc_now_iso() -> str:
@@ -85,11 +150,37 @@ def _extract_first_valid_tool_call(
                 fact = fact_value
             if isinstance(category_value, str) and category_value.strip():
                 category = category_value
+        elif isinstance(args, str):
+            with suppress(Exception):
+                parsed = json.loads(args)
+                if isinstance(parsed, dict):
+                    fact_value = parsed.get("fact_to_remember")
+                    category_value = parsed.get("category")
+                    if isinstance(fact_value, str):
+                        fact = fact_value
+                    if isinstance(category_value, str) and category_value.strip():
+                        category = category_value
 
         if fact and fact.strip():
             return tool_call_id, fact.strip(), category.strip() or "general"
 
     return None, None, "general"
+
+
+def _select_meeting_memory(attendee_name: str, memories: list[MemoryItem], fallback: str) -> str:
+    attendee_lower = attendee_name.lower()
+    for item in memories:
+        if attendee_lower in item.text.lower():
+            return item.text
+    return fallback
+
+
+def _build_meeting_whisper(attendee_name: str, selected_memory: str) -> str:
+    return f"Meeting starting with {attendee_name}. Remember: {selected_memory}"
+
+
+def _format_proactive_whisper_transcript(whisper_generated: str) -> str:
+    return f'[PROACTIVE WHISPER INJECTED: "{whisper_generated}"]'
 
 
 def _extract_tool_call_id(payload: WebhookPayload, tool_name: str) -> str | None:
@@ -207,20 +298,37 @@ def _extract_transcript_excerpt(transcript: Any, limit: int = 220) -> str | None
 
 
 def _build_mem0_client() -> Any:
+    mode = settings.external_services_mode
+
+    if mode == "mock":
+        _log_event("mem0_mode_selected", mode="mock", reason="external_services_mode")
+        return _InMemoryMem0Client()
+
     api_key = (settings.mem0_api_key or os.getenv("MEM0_API_KEY", "")).strip()
     if not api_key:
-        raise HTTPException(status_code=500, detail="MEM0_API_KEY is not configured")
+        if mode == "real":
+            raise HTTPException(status_code=500, detail="MEM0_API_KEY is not configured")
+        _log_event("mem0_mode_selected", mode="mock", reason="missing_api_key")
+        return _InMemoryMem0Client()
 
     if MemoryClient is None:
-        raise HTTPException(status_code=500, detail="mem0ai package is unavailable")
+        if mode == "real":
+            raise HTTPException(status_code=500, detail="mem0ai package is unavailable")
+        _log_event("mem0_mode_selected", mode="mock", reason="mem0_package_unavailable")
+        return _InMemoryMem0Client()
 
     try:
+        _log_event("mem0_mode_selected", mode="real")
         return MemoryClient(api_key=api_key)
     except TypeError:
         # Some SDK versions read MEM0_API_KEY directly from environment.
+        _log_event("mem0_mode_selected", mode="real", variant="env_only")
         return MemoryClient()
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to initialize Mem0 client: {exc}")
+        if mode == "real":
+            raise HTTPException(status_code=500, detail=f"Failed to initialize Mem0 client: {exc}")
+        _log_event("mem0_mode_selected", mode="mock", reason="real_init_failed", error=str(exc))
+        return _InMemoryMem0Client()
 
 
 def _get_mem0_client() -> Any:
